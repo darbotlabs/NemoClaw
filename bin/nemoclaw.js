@@ -39,7 +39,7 @@ const GLOBAL_COMMANDS = new Set([
   "help", "--help", "-h", "--version", "-v",
 ]);
 
-const REMOTE_UNINSTALL_URL = "https://raw.githubusercontent.com/NVIDIA/NemoClaw/refs/heads/main/uninstall.sh";
+const REMOTE_UNINSTALL_URL = "https://raw.githubusercontent.com/darbotlabs/NemoClaw/refs/heads/main/uninstall.sh";
 
 function resolveUninstallScript() {
   const candidates = [

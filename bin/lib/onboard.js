@@ -424,11 +424,26 @@ async function startGateway(gpu) {
   run("openshell gateway destroy -g nemoclaw 2>/dev/null || true", { ignoreError: true });
 
   const gwArgs = ["--name", "nemoclaw"];
-  // Do NOT pass --gpu here. On DGX Spark (and most GPU hosts), inference is
-  // routed through a host-side provider (Ollama, vLLM, or cloud API) — the
-  // sandbox itself does not need direct GPU access. Passing --gpu causes
-  // FailedPrecondition errors when the gateway's k3s device plugin cannot
-  // allocate GPUs. See: https://build.nvidia.com/spark/nemoclaw/instructions
+  // Pass --gpu when CDI specs are present (written by `setup-spark`) and
+  // contain valid NVIDIA device definitions. File existence alone is not
+  // sufficient — an empty or stale file causes silent failure inside k3s.
+  let cdiSpecsReady = false;
+  if (gpu && gpu.type === "nvidia" && fs.existsSync("/etc/cdi/nvidia.yaml")) {
+    try {
+      const cdiContent = fs.readFileSync("/etc/cdi/nvidia.yaml", "utf-8");
+      if (cdiContent.includes("nvidia.com/gpu")) {
+        cdiSpecsReady = true;
+      } else {
+        console.log("  ⚠ CDI specs at /etc/cdi/nvidia.yaml exist but contain no GPU device entries — re-run 'sudo nemoclaw setup-spark'");
+      }
+    } catch (e) {
+      console.log(`  ⚠ Could not read CDI specs: ${e.message}`);
+    }
+  }
+  if (cdiSpecsReady) {
+    gwArgs.push("--gpu");
+    console.log("  GPU passthrough enabled (CDI specs detected at /etc/cdi/nvidia.yaml)");
+  }
   const gatewayEnv = {};
   const openshellVersion = getInstalledOpenshellVersion();
   const stableGatewayImage = openshellVersion
@@ -529,7 +544,17 @@ async function createSandbox(gpu) {
     `--name "${sandboxName}"`,
     `--policy "${basePolicyPath}"`,
   ];
-  // --gpu is intentionally omitted. See comment in startGateway().
+  // Pass --gpu when CDI specs are present and valid (written by `setup-spark`).
+  let cdiSpecsReady = false;
+  if (gpu && gpu.type === "nvidia" && fs.existsSync("/etc/cdi/nvidia.yaml")) {
+    try {
+      const cdiContent = fs.readFileSync("/etc/cdi/nvidia.yaml", "utf-8");
+      cdiSpecsReady = cdiContent.includes("nvidia.com/gpu");
+    } catch (_) { /* silently skip */ }
+  }
+  if (cdiSpecsReady) {
+    createArgs.push("--gpu");
+  }
 
   console.log(`  Creating sandbox '${sandboxName}' (this takes a few minutes on first run)...`);
   const chatUiUrl = process.env.CHAT_UI_URL || 'http://127.0.0.1:18789';
@@ -573,16 +598,19 @@ async function createSandbox(gpu) {
   // On WSL2 + Docker Desktop the pod can take longer to initialize;
   // without this gate, NemoClaw registers a phantom sandbox that
   // causes "sandbox not found" on every subsequent connect/status call.
-  console.log("  Waiting for sandbox to become ready...");
   let ready = false;
-  for (let i = 0; i < 30; i++) {
+  const maxWait = 30;
+  for (let i = 0; i < maxWait; i++) {
+    process.stdout.write(`\r  Waiting for sandbox to become ready... (${i * 2}s)`);
     const list = runCapture("openshell sandbox list 2>&1", { ignoreError: true });
     if (isSandboxReady(list, sandboxName)) {
+      process.stdout.write(`\r  ✓ Sandbox ready                                  \n`);
       ready = true;
       break;
     }
     require("child_process").spawnSync("sleep", ["2"]);
   }
+  if (!ready) process.stdout.write("\n");
 
   if (!ready) {
     // Clean up the orphaned sandbox so the next onboard retry with the same
@@ -747,7 +775,7 @@ async function setupNim(sandboxName, gpu) {
     } else if (selected.key === "ollama") {
       if (!ollamaRunning) {
         console.log("  Starting Ollama...");
-        run("OLLAMA_HOST=0.0.0.0:11434 ollama serve > /dev/null 2>&1 &", { ignoreError: true });
+        run("nohup ollama serve > /tmp/ollama.log 2>&1 &", { ignoreError: true });
         sleep(2);
       }
       console.log("  ✓ Using Ollama on localhost:11434");
@@ -761,7 +789,7 @@ async function setupNim(sandboxName, gpu) {
       console.log("  Installing Ollama via Homebrew...");
       run("brew install ollama", { ignoreError: true });
       console.log("  Starting Ollama...");
-      run("OLLAMA_HOST=0.0.0.0:11434 ollama serve > /dev/null 2>&1 &", { ignoreError: true });
+      run("nohup ollama serve > /tmp/ollama.log 2>&1 &", { ignoreError: true });
         sleep(2);
       console.log("  ✓ Using Ollama on localhost:11434");
       provider = "ollama-local";

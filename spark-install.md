@@ -6,7 +6,7 @@
 
 ```bash
 # Clone and install
-git clone https://github.com/NVIDIA/NemoClaw.git
+git clone https://github.com/darbotlabs/NemoClaw.git
 cd NemoClaw
 sudo npm install -g .
 
@@ -14,7 +14,7 @@ sudo npm install -g .
 nemoclaw setup-spark
 ```
 
-That's it. `setup-spark` handles everything below automatically.
+That's it. `setup-spark` handles everything below automatically, including GPU passthrough.
 
 ## What's Different on Spark
 
@@ -42,6 +42,12 @@ Failed to start ContainerManager: failed to initialize top level QOS containers
 
 **Fix**: `setup-spark` sets `"default-cgroupns-mode": "host"` in `/etc/docker/daemon.json` and restarts Docker. This makes all containers use the host cgroup namespace, which is what k3s needs.
 
+### 3. GPU passthrough
+
+Spark ships with the NVIDIA Container Toolkit pre-installed, but a fresh install may not have the nvidia runtime registered in Docker's `daemon.json` or have CDI device specs in `/etc/cdi/` (the persistent location Docker resolves).
+
+**Fix**: `setup-spark` runs `nvidia-ctk runtime configure --runtime=docker` to register the nvidia runtime and `nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml` to write persistent CDI specs. Then `nemoclaw onboard` detects both `nvidia-smi` and the presence of `/etc/cdi/nvidia.yaml`, and automatically passes `--gpu` to `openshell gateway start` and `openshell sandbox create`, which exposes the GPU inside the NemoClaw sandbox pod. GPU passthrough is skipped if the CDI specs are absent (i.e., `setup-spark` has not been run).
+
 ## Prerequisites
 
 These should already be on your Spark:
@@ -57,6 +63,11 @@ These should already be on your Spark:
   ARCH=$(uname -m)  # aarch64 on Spark
   curl -fsSL "https://github.com/NVIDIA/OpenShell/releases/latest/download/openshell-linux-${ARCH}" -o /usr/local/bin/openshell
   chmod +x /usr/local/bin/openshell
+  ```
+- **NVIDIA Container Toolkit** (pre-installed on Spark, but verify):
+  ```bash
+  nvidia-ctk --version   # should print version
+  nvidia-smi             # should list your GPU
   ```
 - **NVIDIA API Key** from [build.nvidia.com](https://build.nvidia.com) — prompted on first run
 
@@ -89,7 +100,19 @@ sudo usermod -aG docker $USER
 newgrp docker  # or log out and back in
 ```
 
-### Then run the onboard wizard
+### Enable GPU passthrough
+
+```bash
+# Register NVIDIA runtime with Docker and write persistent CDI specs
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo mkdir -p /etc/cdi
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+sudo systemctl restart docker
+
+# Verify
+docker info | grep -i nvidia   # should show nvidia in Runtimes
+nvidia-ctk cdi list            # should list nvidia.com/gpu=all
+```
 
 ```bash
 nemoclaw onboard
@@ -103,7 +126,14 @@ nemoclaw onboard
 | Docker permission denied | Fixed in `setup-spark` | `usermod -aG docker` |
 | CoreDNS CrashLoop after setup | Fixed in `fix-coredns.sh` | Uses container gateway IP, not 127.0.0.11 |
 | Image pull failure (k3s can't find built image) | OpenShell bug | `openshell gateway destroy && openshell gateway start`, re-run setup |
-| GPU passthrough | Untested on Spark | Should work with `--gpu` flag if NVIDIA Container Toolkit is configured |
+| GPU passthrough | Fixed in `setup-spark` | `nvidia-ctk runtime configure` + CDI generate |
+
+```bash
+# Check GPU is visible inside the sandbox
+openshell sandbox connect nemoclaw
+# Inside sandbox:
+nvidia-smi   # should show your Spark GPU
+```
 
 ## Verifying Your Install
 
@@ -125,9 +155,11 @@ openshell term
 
 ```
 DGX Spark (Ubuntu 24.04, cgroup v2)
-  └── Docker (28.x, cgroupns=host)
-       └── OpenShell gateway container
+  ├── NVIDIA GB10 GPU (nvidia-container-toolkit, CDI /etc/cdi/nvidia.yaml)
+  └── Docker (28.x, cgroupns=host, nvidia runtime registered)
+       └── OpenShell gateway container  [--gpu → --device nvidia.com/gpu=all]
             └── k3s (embedded)
                  └── nemoclaw sandbox pod
-                      └── OpenClaw agent + NemoClaw plugin
+                      ├── OpenClaw agent + NemoClaw plugin
+                      └── /dev/nvidia0  (GPU passthrough via CDI)
 ```

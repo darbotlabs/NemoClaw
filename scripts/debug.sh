@@ -14,7 +14,7 @@
 #   nemoclaw debug [--quick] [--output path]    # via CLI wrapper
 #
 # Can also be run without cloning:
-#   curl -fsSL https://raw.githubusercontent.com/NVIDIA/NemoClaw/main/scripts/debug.sh | bash -s -- --quick
+#   curl -fsSL https://raw.githubusercontent.com/darbotlabs/NemoClaw/main/scripts/debug.sh | bash -s -- --quick
 
 set -euo pipefail
 
@@ -70,7 +70,7 @@ Examples:
   nemoclaw debug
   nemoclaw debug --quick
   nemoclaw debug --output /tmp/diag.tar.gz
-  curl -fsSL https://raw.githubusercontent.com/NVIDIA/NemoClaw/main/scripts/debug.sh | bash -s -- --quick
+  curl -fsSL https://raw.githubusercontent.com/darbotlabs/NemoClaw/main/scripts/debug.sh | bash -s -- --quick
 USAGE
       exit 0
       ;;

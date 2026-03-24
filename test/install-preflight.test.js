@@ -9,7 +9,7 @@ import { spawnSync } from "node:child_process";
 
 const INSTALLER = path.join(import.meta.dirname, "..", "install.sh");
 const CURL_PIPE_INSTALLER = path.join(import.meta.dirname, "..", "scripts", "install.sh");
-const GITHUB_INSTALL_URL = "git+https://github.com/NVIDIA/NemoClaw.git";
+const GITHUB_INSTALL_URL = "git+https://github.com/darbotlabs/NemoClaw.git";
 const TEST_SYSTEM_PATH = "/usr/bin:/bin";
 
 function writeExecutable(target, contents) {
